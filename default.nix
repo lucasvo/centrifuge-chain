@@ -35,6 +35,7 @@ in
     preConfigure = ''
       export NIX_CXXSTDLIB_LINK=""
     '';
+    cargoBuildFlags = ["-v"];
 
     meta = with stdenv.lib; {
       description = "centrifuge-chain";

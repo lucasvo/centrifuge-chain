@@ -2,7 +2,7 @@
   mozilla ? import (builtins.fetchTarball https://github.com/mozilla/nixpkgs-mozilla/archive/d46240e8755d91bc36c0c38621af72bf5c489e13.tar.gz)
   ,
   pkgs ? import <nixpkgs> { overlays = [ mozilla ]; },
-  nightly ? pkgs.rustChannelOf { date = "2019-11-19"; channel = "nightly"; };
+  nightly ? pkgs.rustChannelOf { date = "2019-11-19"; channel = "nightly"; }
 }:
 let
   rustc = nightly.rust.override {
