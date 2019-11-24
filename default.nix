@@ -12,7 +12,8 @@ let
     in
     pkgs.makeRustPlatform {
       rustc = nightly.rust.override {
-        targets = ["wasm32-unknown-unknown"];
+        extensions = [ "rust-src" "rust-analysis" "rustfmt-preview" ];
+        targets = [ "wasm32-unknown-unknown" ];
       };
       cargo = nightly.rust;
     };
@@ -22,12 +23,17 @@ in
     pname = "centrifuge-chain";
     version = "0.0.1";
 
-    src = ./.;
-
+    src = builtins.filterSource
+      (path: type: type != "directory" || baseNameOf path != "target")
+      ./.;
+    buildInputs = [ rustc openssl pkgconfig cmake llvmPackages.clang-unwrapped libbfd libopcodes libunwind autoconf automake libtool];
     cargoSha256 = "0l624wllbwq44fla66s8pdyfca6vhrasaxgl1qwd73xljx3rrac2";
-    verifyCargoDeps = true;
+    LIBCLANG_PATH="${llvmPackages.libclang}/lib";
+    RUST_SRC_PATH="${rustc}/lib/rustlib/src/rust/src";
+    ROCKSDB_LIB_DIR="${rocksdb}/lib";
+    PROTOC = "${protobuf}/bin/protoc";
     preConfigure = ''
-      export SKIP_WASM_BUILD=1
+      export NIX_CXXSTDLIB_LINK=""
     '';
 
     meta = with stdenv.lib; {
