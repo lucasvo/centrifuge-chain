@@ -27,15 +27,17 @@ in
       (path: type: type != "directory" || baseNameOf path != "target")
       ./.;
     buildInputs = [ rustc openssl pkgconfig cmake llvmPackages.clang-unwrapped libbfd libopcodes libunwind autoconf automake libtool];
-    cargoSha256 = "0l624wllbwq44fla66s8pdyfca6vhrasaxgl1qwd73xljx3rrac2";
-    LIBCLANG_PATH="${llvmPackages.libclang}/lib";
-    RUST_SRC_PATH="${rustc}/lib/rustlib/src/rust/src";
-    ROCKSDB_LIB_DIR="${rocksdb}/lib";
-    PROTOC = "${protobuf}/bin/protoc";
-    preConfigure = ''
-      export NIX_CXXSTDLIB_LINK=""
-    '';
+    cargoSha256 = "1pqw7c2cxk60bww56xm17g3grq337i2b76hr9msw9rjllwy8shw2";
+#    LIBCLANG_PATH="${llvmPackages.libclang}/lib";
+#    RUST_SRC_PATH="${rustc}/lib/rustlib/src/rust/src";
+#    ROCKSDB_LIB_DIR="${rocksdb}/lib";
+#    PROTOC = "${protobuf}/bin/protoc";
+#    preConfigure = ''
+#      export NIX_CXXSTDLIB_LINK=""
+#    '';
     cargoBuildFlags = ["-v"];
+#    src = ./.;
+
 
     meta = with stdenv.lib; {
       description = "centrifuge-chain";
