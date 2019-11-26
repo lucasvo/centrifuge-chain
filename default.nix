@@ -26,16 +26,25 @@ in
     src = builtins.filterSource
       (path: type: type != "directory" || baseNameOf path != "target")
       ./.;
-    buildInputs = [ rustc openssl pkgconfig cmake llvmPackages.clang-unwrapped libbfd libopcodes libunwind autoconf automake libtool];
-    cargoSha256 = "1pqw7c2cxk60bww56xm17g3grq337i2b76hr9msw9rjllwy8shw2";
-#    LIBCLANG_PATH="${llvmPackages.libclang}/lib";
-#    RUST_SRC_PATH="${rustc}/lib/rustlib/src/rust/src";
-#    ROCKSDB_LIB_DIR="${rocksdb}/lib";
-#    PROTOC = "${protobuf}/bin/protoc";
-#    preConfigure = ''
-#      export NIX_CXXSTDLIB_LINK=""
-#    '';
-    cargoBuildFlags = ["-v"];
+
+      wasmLib = pkgs.fetchzip {
+        url = "https://static.rust-lang.org/dist/rust-std-nightly-wasm32-unknown-unknown.tar.gz";
+        sha256 = "1vcaqiy0srrlqak1grnn4fcchjhjf1r3h6wvmwyvapmc7xymkrx3";
+      };
+
+      buildInputs = [ rustc openssl pkgconfig cmake llvmPackages.clang-unwrapped libbfd libopcodes libunwind autoconf automake libtool];
+      cargoSha256 = "1pqw7c2cxk60bww56xm17g3grq337i2b76hr9msw9rjllwy8shw2";
+      #    LIBCLANG_PATH="${llvmPackages.libclang}/lib";
+      #    RUST_SRC_PATH="${rustc}/lib/rustlib/src/rust/src";
+      #    ROCKSDB_LIB_DIR="${rocksdb}/lib";
+      #    PROTOC = "${protobuf}/bin/protoc";
+      preBuild = ''
+        cp -r $(rustc --print sysroot) rust_sysroot
+        cp -r  ${wasmLib}/rust-std-wasm32-unknown-unknown/lib/rustlib/wasm32-unknown-unknown rust_sysroot/lib/rustlib/
+        export SYSROOT=`pwd`/rust_sysroot
+        export RUSTFLAGS="--sysroot $SYSROOT"
+      '';
+      cargoBuildFlags = ["-v"];
 #    src = ./.;
 
 
