@@ -53,8 +53,8 @@ in
       # by this script.
       #
       preBuild = ''
-        cp -r $(rustc --print sysroot) rust_sysroot
-        cp -r  ${wasmLib}/rust-std-wasm32-unknown-unknown/lib/rustlib/wasm32-unknown-unknown rust_sysroot/lib/rustlib/
+        cp -r $(rustc --print sysroot) $NIX_BUILD_TOP/rust_sysroot
+        cp -r  ${wasmLib}/rust-std-wasm32-unknown-unknown/lib/rustlib/wasm32-unknown-unknown $NIX_BUILD_TOP/rust_sysroot/lib/rustlib/
         export RUSTFLAGS="--sysroot `pwd`/rust_sysroot"
       '';
       cargoBuildFlags = ["-v"];
