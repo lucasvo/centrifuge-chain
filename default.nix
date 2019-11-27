@@ -38,15 +38,26 @@ in
       #    RUST_SRC_PATH="${rustc}/lib/rustlib/src/rust/src";
       #    ROCKSDB_LIB_DIR="${rocksdb}/lib";
       #    PROTOC = "${protobuf}/bin/protoc";
+
+
+      # preBuild might not be the right place to put this but for
+      # testing that should suffice.
+      #
+      # This script tries to work around the fact that `rustc --print sysroot` is
+      # in the nix store and therefore can not be modified. The regular
+      # installation instructions of the wasm libs are to just copy the contents of
+      # the folder to sysroot.
+      #
+      # Instead I am trying to copy the libs into another temporary folder that is
+      # writeable and add the wasm libs there. PWD (/build) however is not writeable
+      # by this script.
+      #
       preBuild = ''
         cp -r $(rustc --print sysroot) rust_sysroot
         cp -r  ${wasmLib}/rust-std-wasm32-unknown-unknown/lib/rustlib/wasm32-unknown-unknown rust_sysroot/lib/rustlib/
-        export SYSROOT=`pwd`/rust_sysroot
-        export RUSTFLAGS="--sysroot $SYSROOT"
+        export RUSTFLAGS="--sysroot `pwd`/rust_sysroot"
       '';
       cargoBuildFlags = ["-v"];
-#    src = ./.;
-
 
     meta = with stdenv.lib; {
       description = "centrifuge-chain";
