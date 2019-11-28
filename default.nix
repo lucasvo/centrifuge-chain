@@ -43,20 +43,22 @@ in
       # preBuild might not be the right place to put this but for
       # testing that should suffice.
       #
-      # This script tries to work around the fact that `rustc --print sysroot` is
+      # This script is a workaround because `rustc --print sysroot` is
       # in the nix store and therefore can not be modified. The regular
       # installation instructions of the wasm libs are to just copy the contents of
       # the folder to sysroot.
       #
-      # Instead I am trying to copy the libs into another temporary folder that is
-      # writeable and add the wasm libs there. PWD (/build) however is not writeable
-      # by this script.
-      #
       preBuild = ''
         cp -r $(rustc --print sysroot) $NIX_BUILD_TOP/rust_sysroot
+        chmod -R +w $NIX_BUILD_TOP/rust_sysroot
         cp -r  ${wasmLib}/rust-std-wasm32-unknown-unknown/lib/rustlib/wasm32-unknown-unknown $NIX_BUILD_TOP/rust_sysroot/lib/rustlib/
-        export RUSTFLAGS="--sysroot `pwd`/rust_sysroot"
       '';
+      preConfigure = ''
+        cat >> $NIX_BUILD_TOP/.cargo/config <<EOF
+        "rustflags" = "--sysroot $NIX_BUILD_TOP/rust_sysroot/"
+        EOF
+      '';
+
       cargoBuildFlags = ["-v"];
 
     meta = with stdenv.lib; {
