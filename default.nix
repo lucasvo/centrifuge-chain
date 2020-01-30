@@ -29,11 +29,11 @@ in
 
       wasmLib = pkgs.fetchzip {
         url = "https://static.rust-lang.org/dist/rust-std-nightly-wasm32-unknown-unknown.tar.gz";
-        sha256 = "1vcaqiy0srrlqak1grnn4fcchjhjf1r3h6wvmwyvapmc7xymkrx3";
+        sha256 = "16ssivapv1qz27xyqkkfna2nmpbq1isxxy4aad7r202d28rz7m55";
       };
 
       buildInputs = [ rustc openssl pkgconfig cmake llvmPackages.clang-unwrapped libbfd libopcodes libunwind autoconf automake libtool];
-      cargoSha256 = "1pqw7c2cxk60bww56xm17g3grq337i2b76hr9msw9rjllwy8shw2";
+      cargoSha256 = "12nn6ysr58pjs4yaqyl67vkjp6iznwcpld82f5vjc2c343lk6gi7";
       #    LIBCLANG_PATH="${llvmPackages.libclang}/lib";
       #    RUST_SRC_PATH="${rustc}/lib/rustlib/src/rust/src";
       #    ROCKSDB_LIB_DIR="${rocksdb}/lib";
@@ -47,13 +47,17 @@ in
       # in the nix store and therefore can not be modified. The regular
       # installation instructions of the wasm libs are to just copy the contents of
       # the folder to sysroot.
-      #
+
+      # Install instructions for target install
+      # https://rustwasm.github.io/wasm-pack/book/prerequisites/non-rustup-setups.html
       preBuild = ''
         cp -r $(rustc --print sysroot) $NIX_BUILD_TOP/rust_sysroot
         chmod -R +w $NIX_BUILD_TOP/rust_sysroot
         cp -r  ${wasmLib}/rust-std-wasm32-unknown-unknown/lib/rustlib/wasm32-unknown-unknown $NIX_BUILD_TOP/rust_sysroot/lib/rustlib/
       '';
       preConfigure = ''
+        echo $BUILD
+        ls $BUILD
         cat >> $NIX_BUILD_TOP/.cargo/config <<EOF
         "rustflags" = "--sysroot $NIX_BUILD_TOP/rust_sysroot/"
         EOF

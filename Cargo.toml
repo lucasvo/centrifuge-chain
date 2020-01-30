@@ -97,6 +97,8 @@ sc-consensus-babe = { git = "https://github.com/paritytech/substrate.git", rev =
 sc-service-test = { git = "https://github.com/paritytech/substrate.git", rev = "ddb309ae7c70e5e51a60879af18819cf28be4a32" }
 futures = "0.3.1"
 tempfile = "3.1.0"
+wasm-builder= { package = "substrate-wasm-builder", git = "https://github.com/paritytech/substrate.git", rev = "ddb309ae7c70e5e51a60879af18819cf28be4a32", version = "1.0.4" }
+
 
 [build-dependencies]
 sc-cli = { git = "https://github.com/paritytech/substrate.git", rev = "ddb309ae7c70e5e51a60879af18819cf28be4a32" }
