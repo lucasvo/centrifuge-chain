@@ -59,6 +59,7 @@ in
         echo $BUILD
         ls $BUILD
         cat >> $NIX_BUILD_TOP/.cargo/config <<EOF
+        [build]
         "rustflags" = "--sysroot $NIX_BUILD_TOP/rust_sysroot/"
         EOF
       '';
