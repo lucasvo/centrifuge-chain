@@ -1,6 +1,4 @@
-/// Handling fees payments for specific transactions
-/// Initially being hard-coded, later coming from the governance module
-
+/// Handling state rent fee payments for specific transactions
 use codec::{Decode, Encode};
 use frame_support::{
     decl_event, decl_module, decl_storage,
@@ -9,12 +7,15 @@ use frame_support::{
     traits::{Currency, ExistenceRequirement, WithdrawReason},
     weights::SimpleDispatchInfo,
 };
-use frame_system::{self as system, ensure_signed};
+use frame_system::{self as system, ensure_root};
+use sp_runtime::traits::EnsureOrigin;
 
 /// The module's configuration trait.
 pub trait Trait: frame_system::Trait + pallet_balances::Trait {
     /// The overarching event type.
     type Event: From<Event<Self>> + Into<<Self as frame_system::Trait>::Event>;
+    /// Required origin for changing fees
+    type FeeChangeOrigin: EnsureOrigin<Self::Origin>;
 }
 
 #[derive(Encode, Decode, Default, Clone, PartialEq)]
@@ -26,21 +27,21 @@ pub struct Fee<Hash, Balance> {
 
 decl_storage! {
     trait Store for Module<T: Trait> as Fees {
-        Fees get(fee) : map T::Hash => Fee<T::Hash, T::Balance>;
+        Fees get(fee) : map hasher(blake2_256) T::Hash => Fee<T::Hash, T::Balance>;
 
         Version: u64;
     }
     add_extra_genesis {
+        // Anchoring state rent fee per day
         config(initial_fees): Vec<(T::Hash, T::Balance)>;
-        build(
-            |config| Module::<T>::initialize_fees(&config.initial_fees))
+        build(|config| Module::<T>::initialize_fees(&config.initial_fees))
     }
 }
 
 decl_event!(
-	pub enum Event<T> where AccountId = <T as frame_system::Trait>::AccountId, <T as frame_system::Trait>::Hash, <T as pallet_balances::Trait>::Balance {
-		FeeChanged(AccountId, Hash, Balance),
-	}
+    pub enum Event<T> where <T as frame_system::Trait>::Hash, <T as pallet_balances::Trait>::Balance {
+        FeeChanged(Hash, Balance),
+    }
 );
 
 decl_module! {
@@ -50,39 +51,28 @@ decl_module! {
         // this is needed only if you are using events in your module
         fn deposit_event() = default;
 
-        fn on_initialize(_now: T::BlockNumber) {
-            if <Version>::get() == 0 {
-                // do first upgrade
-                // ...
-
-                // uncomment when upgraded
-                // <Version<T>>::put(1);
-            }
-        }
-
         /// Set the given fee for the key
+        ///
         /// # <weight>
         /// - Independent of the arguments.
         /// - Contains a limited number of reads and writes.
         /// # </weight>
         #[weight = SimpleDispatchInfo::FixedOperational(1_000_000)]
         pub fn set_fee(origin, key: T::Hash, new_price: T::Balance) -> DispatchResult {
-            let sender = ensure_signed(origin)?;
-            Self::can_change_fee(sender.clone())?;
+            Self::can_change_fee(origin)?;
             Self::change_fee(key, new_price);
 
-            Self::deposit_event(RawEvent::FeeChanged(sender, key, new_price));
+            Self::deposit_event(RawEvent::FeeChanged(key, new_price));
             Ok(())
         }
     }
 }
 
 impl<T: Trait> Module<T> {
-    /// Called by any other module who wants to trigger a fee payment
-    /// for a given account.
+    /// Called by any other module who wants to trigger a fee payment for a given account.
     /// The current fee price can be retrieved via Fees::price_of()
     pub fn pay_fee(who: T::AccountId, key: T::Hash) -> DispatchResult {
-        ensure!(<Fees<T>>::exists(key), "fee not found for key");
+        ensure!(<Fees<T>>::contains_key(key), "fee not found for key");
 
         let single_fee = <Fees<T>>::get(key);
         Self::pay_fee_given(who, single_fee.price)?;
@@ -101,9 +91,10 @@ impl<T: Trait> Module<T> {
         Ok(())
     }
 
+    /// Returns the current fee for the key
     pub fn price_of(key: T::Hash) -> Option<T::Balance> {
         //why this has been hashed again after passing to the function? sp_io::print(key.as_ref());
-        if <Fees<T>>::exists(&key) {
+        if <Fees<T>>::contains_key(&key) {
             let single_fee = <Fees<T>>::get(&key);
             Some(single_fee.price)
         } else {
@@ -111,9 +102,12 @@ impl<T: Trait> Module<T> {
         }
     }
 
-    fn can_change_fee(_who: T::AccountId) -> DispatchResult {
-        //TODO add auth who can change fees
-        //        ensure!(<validatorset::Module<T>>::is_validator(who), "Not authorized to change fees.");
+    /// Returns true if the given origin can change the fee
+    fn can_change_fee(origin: T::Origin) -> DispatchResult {
+        T::FeeChangeOrigin::try_origin(origin)
+            .map(|_| ())
+            .or_else(ensure_root)?;
+
         Ok(())
     }
 
@@ -124,7 +118,7 @@ impl<T: Trait> Module<T> {
             .count();
     }
 
-    /// change the fee for the given key
+    /// Change the fee for the given key
     fn change_fee(key: T::Hash, fee: T::Balance) {
         let new_fee = Fee {
             key: key.clone(),
@@ -139,16 +133,20 @@ impl<T: Trait> Module<T> {
 mod tests {
     use super::*;
 
+    use frame_support::{
+        assert_err, assert_noop, assert_ok, dispatch::DispatchError, impl_outer_origin,
+        ord_parameter_types, parameter_types, weights::Weight,
+    };
+    use frame_system::EnsureSignedBy;
     use sp_core::H256;
     use sp_runtime::Perbill;
     use sp_runtime::{
         testing::Header,
-        traits::{BlakeTwo256, IdentityLookup, Hash},
+        traits::{BadOrigin, BlakeTwo256, Hash, IdentityLookup},
     };
-    use frame_support::{assert_err, assert_ok, impl_outer_origin, parameter_types, weights::Weight, dispatch::DispatchError};
 
     impl_outer_origin! {
-        pub enum Origin for Test {}
+        pub enum Origin for Test  where system = frame_system {}
     }
 
     // For testing the module, we construct most of a mock runtime. This means
@@ -179,30 +177,29 @@ mod tests {
         type AvailableBlockRatio = AvailableBlockRatio;
         type Version = ();
         type ModuleToIndex = ();
+        type AccountData = pallet_balances::AccountData<u64>;
+        type OnNewAccount = ();
+        type OnKilledAccount = pallet_balances::Module<Test>;
+    }
+    ord_parameter_types! {
+        pub const One: u64 = 1;
     }
     impl Trait for Test {
         type Event = ();
+        type FeeChangeOrigin = EnsureSignedBy<One, u64>;
     }
     parameter_types! {
-        pub const ExistentialDeposit: u64 = 0;
-        pub const TransferFee: u64 = 0;
-        pub const CreationFee: u64 = 0;
-        pub const TransactionBaseFee: u64 = 0;
-        pub const TransactionByteFee: u64 = 0;
+        pub const ExistentialDeposit: u64 = 1;
     }
     impl pallet_balances::Trait for Test {
         type Balance = u64;
-        type OnFreeBalanceZero = ();
-        type OnNewAccount = ();
-        type Event = ();
-
         type DustRemoval = ();
-        type TransferPayment = ();
+        type Event = ();
         type ExistentialDeposit = ExistentialDeposit;
-        type TransferFee = TransferFee;
-        type CreationFee = CreationFee;
+        type AccountStore = System;
     }
     type Fees = Module<Test>;
+    type System = frame_system::Module<Test>;
 
     // This function basically just builds a genesis storage key/value store according to
     // our desired mockup.
@@ -214,7 +211,6 @@ mod tests {
         // pre-fill balances
         pallet_balances::GenesisConfig::<Test> {
             balances: vec![(1, 100000), (2, 100000)],
-            vesting: vec![],
         }
         .assimilate_storage(&mut t)
         .unwrap();
@@ -222,9 +218,10 @@ mod tests {
     }
 
     #[test]
-    fn can_change_fee_allows_all() {
+    fn can_change_fee() {
         new_test_ext().execute_with(|| {
-            assert_ok!(Fees::can_change_fee(123));
+            assert_noop!(Fees::can_change_fee(Origin::signed(2)), BadOrigin);
+            assert_ok!(Fees::can_change_fee(Origin::signed(1)));
         });
     }
 
@@ -237,6 +234,10 @@ mod tests {
             let price1: <Test as pallet_balances::Trait>::Balance = 666;
             let price2: <Test as pallet_balances::Trait>::Balance = 777;
 
+            assert_noop!(
+                Fees::set_fee(Origin::signed(2), fee_key1, price1),
+                BadOrigin
+            );
             assert_ok!(Fees::set_fee(Origin::signed(1), fee_key1, price1));
             assert_ok!(Fees::set_fee(Origin::signed(1), fee_key2, price2));
 
@@ -259,9 +260,12 @@ mod tests {
             let loaded_fee = Fees::fee(fee_key);
             assert_eq!(loaded_fee.price, initial_price);
 
-            // set fee to different price, set by different account
             let new_price: <Test as pallet_balances::Trait>::Balance = 777;
-            assert_ok!(Fees::set_fee(Origin::signed(2), fee_key, new_price));
+            assert_noop!(
+                Fees::set_fee(Origin::signed(2), fee_key, new_price),
+                BadOrigin
+            );
+            assert_ok!(Fees::set_fee(Origin::signed(1), fee_key, new_price));
             let again_loaded_fee = Fees::fee(fee_key);
             assert_eq!(again_loaded_fee.price, new_price);
         });
