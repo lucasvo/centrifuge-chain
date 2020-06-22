@@ -8,34 +8,37 @@ use sp_std::prelude::*;
 use frame_support::{
 	construct_runtime, parameter_types, debug,
 	weights::Weight,
-	traits::{SplitTwoWays, Currency, Randomness},
+	traits::{Currency, Randomness},
 };
-use sp_core::u32_trait::{_0, _1, _2, _3, _4, _5};
+use sp_core::u32_trait::{_1, _2, _3, _4};
 pub use node_primitives::{AccountId, Signature};
 use node_primitives::{AccountIndex, Balance, BlockNumber, Hash, Index, Moment};
 use sp_api::{decl_runtime_apis, impl_runtime_apis};
 use sp_runtime::{
-	Permill, Perbill, Percent, ApplyExtrinsicResult,
+	Perbill, ApplyExtrinsicResult,
 	impl_opaque_keys, generic, create_runtime_str,
 };
 use sp_runtime::curve::PiecewiseLinear;
 use sp_runtime::transaction_validity::TransactionValidity;
 use sp_runtime::traits::{
-	self, BlakeTwo256, Block as BlockT, StaticLookup, SaturatedConversion,
+	self, BlakeTwo256, Block as BlockT, IdentityLookup, SaturatedConversion,
 	OpaqueKeys,
 };
 use sp_version::RuntimeVersion;
 #[cfg(any(feature = "std", test))]
 use sp_version::NativeVersion;
 use sp_core::OpaqueMetadata;
+use sp_io::hashing::blake2_128;
 use pallet_grandpa::AuthorityList as GrandpaAuthorityList;
 use pallet_grandpa::fg_primitives;
 use pallet_im_online::sr25519::{AuthorityId as ImOnlineId};
 use sp_authority_discovery::AuthorityId as AuthorityDiscoveryId;
 use pallet_transaction_payment_rpc_runtime_api::RuntimeDispatchInfo;
 use frame_system::offchain::TransactionSubmitter;
+// use frame_system::EnsureSigned;
 use sp_inherents::{InherentData, CheckInherentsResult};
 use crate::anchor::AnchorData;
+use pallet_collective::EnsureProportionMoreThan;
 
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
@@ -46,6 +49,8 @@ pub use pallet_staking::StakerStatus;
 /// Implementations of some helper traits passed into runtime modules as associated types.
 pub mod impls;
 use impls::{CurrencyToVoteHandler, Author, LinearWeightToFee, TargetedFeeAdjustment};
+// TODO uncomment this when ready to merge bridge pallet
+// use bridge as pallet_bridge;
 
 /// Used for anchor module
 pub mod anchor;
@@ -61,6 +66,10 @@ mod proofs;
 
 /// nft module
 mod nfts;
+
+// TODO uncomment this when ready to merge bridge pallet
+/// bridge module
+// mod bridge;
 
 /// Constant values used within the runtime.
 pub mod constants;
@@ -79,8 +88,8 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
     // and set impl_version to 0. If only runtime
     // implementation changes and behavior does not, then leave spec_version as
     // is and increment impl_version.
-    spec_version: 225,
-    impl_version: 1,
+    spec_version: 227,
+    impl_version: 4,
     apis: RUNTIME_API_VERSIONS,
 };
 
@@ -94,13 +103,6 @@ pub fn native_version() -> NativeVersion {
 }
 
 type NegativeImbalance = <Balances as Currency<AccountId>>::NegativeImbalance;
-
-pub type DealWithFees = SplitTwoWays<
-	Balance,
-	NegativeImbalance,
-	_0, Treasury,   // 0 parts (0%) goes to the treasury.
-	_1, Author,     // 1 part (100%) goes to the block author.
->;
 
 parameter_types! {
     pub const BlockHashCount: BlockNumber = 250;
@@ -126,7 +128,7 @@ impl frame_system::Trait for Runtime {
     /// The identifier used to distinguish between accounts.
     type AccountId = AccountId;
     /// The lookup mechanism to get account ID from whatever is passed in dispatchers.
-    type Lookup = Indices;
+    type Lookup = IdentityLookup<AccountId>;
     /// The header type.
     type Header = generic::Header<BlockNumber, BlakeTwo256>;
     /// The overarching event type.
@@ -162,6 +164,7 @@ parameter_types! {
 	pub const MaxSignatories: u16 = 100;
 }
 
+
 impl pallet_utility::Trait for Runtime {
 	type Event = Event;
 	type Call = Call;
@@ -180,22 +183,6 @@ impl pallet_babe::Trait for Runtime {
     type EpochDuration = EpochDuration;
     type ExpectedBlockTime = ExpectedBlockTime;
     type EpochChangeTrigger = pallet_babe::ExternalTrigger;
-}
-
-parameter_types! {
-	pub const IndexDeposit: Balance = 1 * MICRO_RAD;
-}
-
-impl pallet_indices::Trait for Runtime {
-    /// The type for recording indexing into the account enumeration. If this ever overflows, there
-    /// will be problems!
-    type AccountIndex = AccountIndex;
-    /// The overarching event type.
-	type Event = Event;
-	/// The currency trait.
-	type Currency = Balances;
-	/// The deposit needed for reserving an index.
-	type Deposit = IndexDeposit;
 }
 
 parameter_types! {
@@ -226,7 +213,7 @@ parameter_types! {
 
 impl pallet_transaction_payment::Trait for Runtime {
 	type Currency = Balances;
-	type OnTransactionPayment = DealWithFees;
+	type OnTransactionPayment = Author;
 	type TransactionBaseFee = TransactionBaseFee;
 	type TransactionByteFee = TransactionByteFee;
 	type WeightToFee = LinearWeightToFee<WeightFeeCoefficient>;
@@ -283,9 +270,15 @@ impl pallet_session::historical::Trait for Runtime {
 	type FullIdentificationOf = pallet_staking::ExposureOf<Runtime>;
 }
 
+// set to almost three percent to correct for a bug, see https://github.com/paritytech/substrate/issues/4964 for
+// details and https://play.rust-lang.org/?version=stable&mode=debug&edition=2018&gist=e6490da3bfb28f69c7f6e6393ec6bb0c
+// for the calculation
+// TODO: set back to Perbill::from_percent(3) as soon as the bug above is fixed.
+const THREE_PERCENT_INFLATION: Perbill = Perbill::from_parts(29_559_999);
+
 const REWARD_CURVE: PiecewiseLinear<'static> = PiecewiseLinear {
-	points: &[(Perbill::from_percent(0), Perbill::from_percent(3))],
-	maximum: Perbill::from_percent(3),
+	points: &[(Perbill::from_percent(0), THREE_PERCENT_INFLATION)],
+	maximum: THREE_PERCENT_INFLATION,
 };
 
 parameter_types! {
@@ -299,9 +292,9 @@ impl pallet_staking::Trait for Runtime {
 	type Currency = Balances;
 	type Time = Timestamp;
 	type CurrencyToVote = CurrencyToVoteHandler;
-	type RewardRemainder = Treasury;
+	type RewardRemainder = ();
 	type Event = Event;
-	type Slash = Treasury; // send the slashed funds to the treasury.
+	type Slash = ();
 	type Reward = (); // rewards are minted from the void
 	type SessionsPerEra = SessionsPerEra;
 	type BondingDuration = BondingDuration;
@@ -374,7 +367,7 @@ impl pallet_democracy::Trait for Runtime {
 	type PreimageByteDeposit = PreimageByteDeposit;
 
 	/// Handler for the unbalanced reduction when slashing a preimage deposit.
-	type Slash = Treasury;
+	type Slash = ();
 }
 
 type CouncilCollective = pallet_collective::Instance1;
@@ -387,7 +380,7 @@ impl pallet_collective::Trait<CouncilCollective> for Runtime {
 parameter_types! {
 	pub const CandidacyBond: Balance = 1000 * RAD;
 	pub const VotingBond: Balance = 50 * CENTI_RAD;
-	pub const TermDuration: BlockNumber = 7 * DAYS;
+	pub const TermDuration: BlockNumber = 1 * DAYS;
 	pub const DesiredMembers: u32 = 5;
 	pub const DesiredRunnersUp: u32 = 3;
 }
@@ -404,9 +397,9 @@ impl pallet_elections_phragmen::Trait for Runtime {
 	/// How much should be locked up in order to be able to submit votes.
 	type VotingBond = VotingBond;
 
-	type LoserCandidate = Treasury;
-	type BadReport = Treasury;
-	type KickedMember = Treasury;
+	type LoserCandidate = ();
+	type BadReport = ();
+	type KickedMember = ();
 
 	/// Number of members to elect.
 	type DesiredMembers = DesiredMembers;
@@ -418,62 +411,6 @@ impl pallet_elections_phragmen::Trait for Runtime {
 	/// round will happen. If set to zero, no elections are ever triggered and the module will
 	/// be in passive mode.
 	type TermDuration = TermDuration;
-}
-
-parameter_types! {
-	pub const ProposalBond: Permill = Permill::from_percent(5);
-	pub const ProposalBondMinimum: Balance = 200 * RAD;
-	pub const SpendPeriod: BlockNumber = 6 * DAYS;
-	pub const Burn: Permill = Permill::from_percent(0);
-	pub const TipCountdown: BlockNumber = 1 * DAYS;
-	pub const TipFindersFee: Percent = Percent::from_percent(20);
-	pub const TipReportDepositBase: Balance = 10 * RAD;
-	pub const TipReportDepositPerByte: Balance = 10 * CENTI_RAD;
-}
-
-impl pallet_treasury::Trait for Runtime {
-	/// The staking balance.
-	type Currency = Balances;
-
-	/// Origin from which approvals must come.
-	type ApproveOrigin = pallet_collective::EnsureProportionAtLeast<_3, _5, AccountId, CouncilCollective>;
-
-	/// Origin from which rejections must come.
-	type RejectOrigin = pallet_collective::EnsureProportionMoreThan<_1, _2, AccountId, CouncilCollective>;
-
-	/// Origin from which tippers must come.
-	type Tippers = Elections;
-
-	/// The period for which a tip remains open after is has achieved threshold tippers.
-	type TipCountdown = TipCountdown;
-
-	/// The percent of the final tip which goes to the original reporter of the tip.
-	type TipFindersFee = TipFindersFee;
-
-	/// The amount held on deposit for placing a tip report.
-	type TipReportDepositBase = TipReportDepositBase;
-
-	/// The amount held on deposit per byte within the tip report reason.
-	type TipReportDepositPerByte = TipReportDepositPerByte;
-
-	/// The overarching event type.
-	type Event = Event;
-
-	/// Handler for the unbalanced decrease when slashing for a rejected proposal.
-	type ProposalRejection = Treasury;
-
-	/// Fraction of a proposal's value that should be bonded in order to place the proposal.
-	/// An accepted proposal gets these back. A rejected proposal does not.
-	type ProposalBond = ProposalBond;
-
-	/// Minimum amount of funds that should be placed in a deposit for making a proposal.
-	type ProposalBondMinimum = ProposalBondMinimum;
-
-	/// Period between successive spends.
-	type SpendPeriod = SpendPeriod;
-
-	/// Percentage of spare funds (if any) that are burnt per spend period.
-	type Burn = Burn;
 }
 
 /// A runtime transaction submitter.
@@ -552,9 +489,8 @@ impl frame_system::offchain::CreateTransaction<Runtime, UncheckedExtrinsic> for 
 			debug::warn!("Unable to create signed payload: {:?}", e);
 		}).ok()?;
 		let signature = TSigner::sign(public, &raw_payload)?;
-		let address = Indices::unlookup(account);
 		let (call, extra, _) = raw_payload.deconstruct();
-		Some((call, (address, signature, extra)))
+		Some((call, (account, signature, extra)))
 	}
 }
 
@@ -571,6 +507,90 @@ impl nfts::Trait for Runtime {
     type Event = Event;
 }
 
+parameter_types! {
+	pub const MultiAccountSigDepositBase: Balance = 30 * CENTI_RAD;
+	pub const MultiAccountDepositBase: Balance = 30 * CENTI_RAD;
+	pub const MultiAccountSigDepositFactor: Balance = 5 * CENTI_RAD;
+	pub const MultiAccountDepositFactor: Balance = 5 * CENTI_RAD;
+	pub const MultiAccountMaxSignatories: u16 = 100;
+}
+impl substrate_pallet_multi_account::Trait for Runtime {
+    type Event = Event;
+    type Currency = Balances;
+    type Call = Call;
+    type MaxSignatories = MultiAccountMaxSignatories;
+    type MultiAccountDepositBase = MultiAccountDepositBase;
+    type MultiAccountDepositFactor =  MultiAccountDepositFactor;
+    type MultisigDepositBase = MultiAccountSigDepositBase;
+    type MultisigDepositFactor = MultiAccountSigDepositFactor;
+}
+
+parameter_types! {
+    pub const MaxSubAccounts: u32 = 100;
+    pub const MaxAdditionalFields: u32 = 100;
+    pub const BasicDeposit: Balance = 100 * RAD;
+    pub const FieldDeposit: Balance = 25 * RAD;
+    pub const SubAccountDeposit: Balance = 20 * RAD;
+}
+
+impl pallet_identity::Trait for Runtime {
+    type Event = Event;
+    type Currency = Balances;
+    type BasicDeposit = BasicDeposit;
+    type FieldDeposit = FieldDeposit;
+    type SubAccountDeposit = SubAccountDeposit;
+    type MaxSubAccounts = MaxSubAccounts;
+    type MaxAdditionalFields = MaxAdditionalFields;
+    type Slashed = ();
+    type RegistrarOrigin = EnsureProportionMoreThan<_1, _2, AccountId, CouncilCollective>;
+    type ForceOrigin = EnsureProportionMoreThan<_1, _2, AccountId, CouncilCollective>;
+}
+
+
+parameter_types! {
+    pub const HashId: chainbridge::ResourceId = chainbridge::derive_resource_id(1, &blake2_128(b"cent_nft_hash"));
+	pub const NativeTokenId: chainbridge::ResourceId = chainbridge::derive_resource_id(1, &blake2_128(b"xRAD"));
+}
+
+// TODO uncomment this when ready to merge bridge pallet
+// impl bridge::Trait for Runtime {
+// 	type Event = Event;
+// 	type BridgeOrigin = EnsureSigned<AccountId>;
+// 	type Currency = Balances;
+// 	type HashId = HashId;
+// 	type NativeTokenId = NativeTokenId;
+// }
+
+
+parameter_types! {
+    pub const ChainId: u8 = 1;
+}
+
+// TODO uncomment this when ready to merge bridge pallet
+// impl chainbridge::Trait for Runtime {
+//     type Event = Event;
+//     type Proposal = Call;
+//     type ChainId = ChainId;
+// 	/// A 75% majority of the council can update bridge settings.
+// 	type AdminOrigin = pallet_collective::EnsureProportionAtLeast<_3, _4, AccountId, CouncilCollective>;
+// }
+
+parameter_types! {
+	pub const IndexDeposit: Balance = 1 * MILLI_RAD;
+}
+
+impl pallet_indices::Trait for Runtime {
+	/// The type for recording indexing into the account enumeration. If this ever overflows, there
+	/// will be problems!
+	type AccountIndex = AccountIndex;
+	/// The overarching event type.
+	type Event = Event;
+	/// The currency trait.
+	type Currency = Balances;
+	/// The deposit needed for reserving an index.
+	type Deposit = IndexDeposit;
+}
+
 construct_runtime!(
 	pub enum Runtime where
 		Block = Block,
@@ -582,7 +602,6 @@ construct_runtime!(
 		Babe: pallet_babe::{Module, Call, Storage, Config, Inherent(Timestamp)},
 		Timestamp: pallet_timestamp::{Module, Call, Storage, Inherent},
 		Authorship: pallet_authorship::{Module, Call, Storage, Inherent},
-		Indices: pallet_indices::{Module, Call, Storage, Config<T>, Event<T>},
 		Balances: pallet_balances::{Module, Call, Storage, Config<T>, Event<T>},
 		TransactionPayment: pallet_transaction_payment::{Module, Storage},
 		Staking: pallet_staking::{Module, Call, Config<T>, Storage, Event<T>},
@@ -592,7 +611,6 @@ construct_runtime!(
 		Elections: pallet_elections_phragmen::{Module, Call, Storage, Event<T>},
 		FinalityTracker: pallet_finality_tracker::{Module, Call, Inherent},
 		Grandpa: pallet_grandpa::{Module, Call, Storage, Config, Event},
-		Treasury: pallet_treasury::{Module, Call, Storage, Config, Event<T>},
 		ImOnline: pallet_im_online::{Module, Call, Storage, Event<T>, ValidateUnsigned, Config<T>},
 		AuthorityDiscovery: pallet_authority_discovery::{Module, Call, Config},
 		Offences: pallet_offences::{Module, Call, Storage, Event},
@@ -600,11 +618,17 @@ construct_runtime!(
 		Anchor: anchor::{Module, Call, Storage},
 		Fees: fees::{Module, Call, Storage, Event<T>, Config<T>},
 		Nfts: nfts::{Module, Call, Event<T>},
+		MultiAccount: substrate_pallet_multi_account::{Module, Call, Storage, Event<T>, Config<T>},
+		Identity: pallet_identity::{Module, Call, Storage, Event<T>},
+		// TODO uncomment this when ready to merge bridge pallet
+		// PalletBridge: pallet_bridge::{Module, Call, Storage, Event<T>, Config<T>},
+		// ChainBridge: chainbridge::{Module, Call, Storage, Event<T>},
+		Indices: pallet_indices::{Module, Call, Storage, Config<T>, Event<T>},
 	}
 );
 
 /// The address format for describing accounts.
-pub type Address = <Indices as StaticLookup>::Source;
+pub type Address = AccountId;
 /// Block header type as expected by this runtime.
 pub type Header = generic::Header<BlockNumber, BlakeTwo256>;
 /// Block type as expected by this runtime.

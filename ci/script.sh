@@ -2,6 +2,8 @@
 
 set -eux
 
+RUST_TOOLCHAIN="${RUST_TOOLCHAIN:-nightly}"
+
 # Enable warnings about unused extern crates
 export RUSTFLAGS=" -W unused-extern-crates"
 
@@ -11,23 +13,18 @@ curl https://sh.rustup.rs -sSf | sh -s -- -y
 # Load cargo environment. Specifically, put cargo into PATH.
 source ~/.cargo/env
 
-rustup toolchain install $RUST_TOOLCHAIN
-rustup default $RUST_TOOLCHAIN
-
-rustc --version
-rustup --version
-cargo --version
-
 sudo apt-get -y update
 sudo apt-get install -y cmake pkg-config libssl-dev
 
 ./scripts/init.sh
 
-rustup target add wasm32-unknown-unknown --toolchain $RUST_TOOLCHAIN
+rustc --version
+rustup --version
+cargo --version
 
 case $TARGET in
 	"build-client")
-		cargo build --release --locked "$@"
+		cargo build --release "$@"
 		;;
 
 	"runtime-test")
@@ -46,4 +43,9 @@ case $TARGET in
         bash <(curl -s https://codecov.io/bash) &&
         echo "Uploaded code coverage"
 		;;
+
+  "build-runtime")
+    export RUSTC_VERSION=$RUST_TOOLCHAIN
+    export PACKAGE=centrifuge-chain-runtime
+    docker run --rm -e PACKAGE=$PACKAGE -v $PWD:/build -v /tmp/cargo:/cargo-home chevdor/srtool:$RUSTC_VERSION build
 esac

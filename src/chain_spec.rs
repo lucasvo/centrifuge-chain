@@ -1,8 +1,8 @@
 use sp_core::{Pair, Public, crypto::UncheckedInto, sr25519};
 use node_runtime::{
-	AuthorityDiscoveryConfig, BabeConfig, BalancesConfig, CouncilConfig, DemocracyConfig,
-	FeesConfig, GrandpaConfig, ImOnlineConfig, SessionConfig, SessionKeys, StakerStatus, StakingConfig,
-	IndicesConfig, SystemConfig, WASM_BINARY,
+	AuthorityDiscoveryConfig, BabeConfig, BalancesConfig, CouncilConfig, DemocracyConfig, // Add PalletBridgeConfig
+	FeesConfig, GrandpaConfig, ImOnlineConfig, MultiAccount, MultiAccountConfig, SessionConfig, SessionKeys,
+	StakerStatus, StakingConfig, SystemConfig, WASM_BINARY,
 };
 use node_runtime::constants::currency::*;
 use sc_service;
@@ -12,6 +12,7 @@ use sp_consensus_babe::{AuthorityId as BabeId};
 use pallet_im_online::sr25519::{AuthorityId as ImOnlineId};
 use sp_authority_discovery::AuthorityId as AuthorityDiscoveryId;
 use sp_runtime::{Perbill, traits::{Verify, IdentifyAccount}};
+use node_runtime::IndicesConfig;
 
 pub use node_primitives::{AccountId, Balance, Hash, Signature};
 pub use node_runtime::GenesisConfig;
@@ -53,6 +54,7 @@ pub fn get_account_id_from_seed<TPublic: Public>(seed: &str) -> AccountId where
 }
 
 /// Helper function to generate stash, controller and session key from seed
+/// Note: this should be used only for dev testnets.
 pub fn get_authority_keys_from_seed(seed: &str) -> (
     AccountId,
     AccountId,
@@ -80,7 +82,7 @@ impl Alternative {
 			Alternative::Fulvous => fulvous_config(),
 			Alternative::Flint => flint_config()?,
 			Alternative::Amber => amber_config()?,
-			Alternative::Mainnet => panic!("Mainnet spec is not yet available"),
+			Alternative::Mainnet => mainnet_config()?,
 		})
 	}
 
@@ -99,12 +101,17 @@ impl Alternative {
 
 /// Flint testnet generator
 pub fn flint_config() -> Result<ChainSpec, String> {
-	ChainSpec::from_json_bytes(&include_bytes!("../res/flint-cc2-spec.json")[..])
+	ChainSpec::from_json_bytes(&include_bytes!("../res/flint-cc3-spec.json")[..])
 }
 
 /// Amber testnet generator
 pub fn amber_config() -> Result<ChainSpec, String> {
-	ChainSpec::from_json_bytes(&include_bytes!("../res/amber-spec.json")[..])
+	ChainSpec::from_json_bytes(&include_bytes!("../res/amber-cc2-spec.json")[..])
+}
+
+/// Mainnet generator
+pub fn mainnet_config() -> Result<ChainSpec, String> {
+	ChainSpec::from_json_bytes(&include_bytes!("../res/mainnet-spec.json")[..])
 }
 
 fn session_keys(
@@ -122,7 +129,7 @@ pub fn testnet_genesis(
 	initial_authorities: Vec<(AccountId, AccountId, GrandpaId, BabeId, ImOnlineId, AuthorityDiscoveryId)>,
     endowed_accounts: Option<Vec<AccountId>>,
 ) -> GenesisConfig {
-    let endowed_accounts: Vec<AccountId> = endowed_accounts.unwrap_or_else(|| {
+    let mut endowed_accounts: Vec<AccountId> = endowed_accounts.unwrap_or_else(|| {
 		vec![
 			get_account_id_from_seed::<sr25519::Public>("Alice"),
 			get_account_id_from_seed::<sr25519::Public>("Bob"),
@@ -137,7 +144,10 @@ pub fn testnet_genesis(
 			get_account_id_from_seed::<sr25519::Public>("Eve//stash"),
 			get_account_id_from_seed::<sr25519::Public>("Ferdie//stash"),
 		]
-    });
+	});
+	// add a balance for the multi account id 1 created further down, this will have address
+	// 5DnGuePtDg4x7vCiUgjxrfFVVvMiA5aBDKLRbAp4SVohAMn8 on the default substrate chain
+	endowed_accounts.push(MultiAccount::multi_account_id(1));
     let num_endowed_accounts = endowed_accounts.len();
 
     const INITIAL_SUPPLY: Balance = 300_000_000 * RAD; // 3% of total supply
@@ -155,9 +165,6 @@ pub fn testnet_genesis(
                 .map(|k| (k, endowment))
                 .chain(initial_authorities.iter().map(|x| (x.0.clone(), STASH)))
                 .collect(),
-        }),
-        pallet_indices: Some(IndicesConfig {
-            indices: vec![],
         }),
         pallet_session: Some(SessionConfig {
 			keys: initial_authorities.iter().map(|x| {
@@ -198,13 +205,30 @@ pub fn testnet_genesis(
         pallet_im_online: Some(ImOnlineConfig {
 			keys: vec![],
         }),
+		pallet_indices: Some(IndicesConfig {
+			indices: vec![],
+		}),
         pallet_authority_discovery: Some(AuthorityDiscoveryConfig {
 			keys: vec![],
 		}),
         pallet_grandpa: Some(GrandpaConfig {
             authorities: vec![],
-        }),
-        pallet_treasury: Some(Default::default()),
+		}),
+		substrate_pallet_multi_account: Some(MultiAccountConfig{
+			multi_accounts: vec![
+				// Add the first 3 accounts to a 2-of-3 multi account
+				(endowed_accounts[0].clone(), 2, vec![endowed_accounts[1].clone(), endowed_accounts[2].clone()]),
+			],
+		}),
+		// TODO uncomment this when ready to merge bridge pallet
+		// pallet_bridge: Some(PalletBridgeConfig{
+		// 	// Whitelist chains Ethereum - 0
+		// 	chains: vec![0],
+		// 	// Whitelisted resourceIDs
+		// 	resources: vec![hex!["00000000000000000000000000000009e974040e705c10fb4de576d6cc261900"]],
+		// 	// Alice - 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY
+		// 	relayers: vec![hex!["d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d"].into()],
+		// }),
         fees: Some(FeesConfig {
             initial_fees: vec![(
                 // Anchoring state rent fee per day
@@ -301,7 +325,9 @@ fn fulvous_genesis() -> GenesisConfig {
             ),
         ],
         Some(vec![
-            hex!["c405224448dcd4259816b09cfedbd8df0e6796b16286ea18efa2d6343da5992e"].into()
+            hex!["20caaa19510a791d1f3799dac19f170938aeb0e58c3d1ebf07010532e599d728"].into(),
+            hex!["9efc9f132428d21268710181fe4315e1a02d838e0e5239fe45599f54310a7c34"].into(),
+            hex!["c405224448dcd4259816b09cfedbd8df0e6796b16286ea18efa2d6343da5992e"].into(),
         ]),
 	)
 }
@@ -332,7 +358,9 @@ pub(crate) mod tests {
 	use super::*;
 	use crate::service::{new_full, new_light};
 	use sc_service_test;
-	use sp_runtime::BuildStorage;
+	use sp_runtime::{ModuleId, BuildStorage, traits::AccountIdConversion};
+	use sp_core::crypto::{Ss58Codec, Ss58AddressFormat::CentrifugeAccountDirect};
+
 
 	fn local_testnet_genesis_instant_single() -> GenesisConfig {
 		testnet_genesis(
@@ -379,6 +407,27 @@ pub(crate) mod tests {
 			|config| new_full(config),
 			|config| new_light(config),
 		);
+	}
+
+	#[test]
+	fn test_centrifuge_multi_account_ids() {
+		assert_eq!(MultiAccount::multi_account_id(1).to_ss58check_with_version(CentrifugeAccountDirect),
+			"4d4KMh9TuvpbBZmw3VTpbFewd1Vwpyo45g1du4xFfNEmUKQV");
+		assert_eq!(MultiAccount::multi_account_id(2).to_ss58check_with_version(CentrifugeAccountDirect),
+			"4ghzKGVmwh7wKFaWVF3d4QTbg21AbTo4mMPM5YUkkQasth4e");
+		assert_eq!(MultiAccount::multi_account_id(3).to_ss58check_with_version(CentrifugeAccountDirect),
+			"4fM9N5BuADmbYBn4SPNnSVhfD9TVoBc83BC3ZJWei5FmAunc");
+		assert_eq!(MultiAccount::multi_account_id(4).to_ss58check_with_version(CentrifugeAccountDirect),
+			"4eHarY1f35y2wtbW3XKLbbnJHeztAjNsxcYEoMnjfQbKXyq3");
+		assert_eq!(MultiAccount::multi_account_id(5).to_ss58check_with_version(CentrifugeAccountDirect),
+			"4dTzs4ktTARToFk6k12Diu8ZHeP9bPCTfh1erAGhd3THtqCZ");
+	}
+
+	#[test]
+	fn test_centrifuge_bridge_account_id() {
+		let account_id: AccountId = ModuleId(*b"cb/bridg").into_account();
+		assert_eq!(account_id.to_ss58check_with_version(CentrifugeAccountDirect),
+			"4dpEcgqFor2TJw9uWSjx2JpjkNmTic2UjJAK1j9fRtcTUoRu");
 	}
 
 	#[test]
