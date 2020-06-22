@@ -20,5 +20,6 @@ in
   PROTOC = "${protobuf}/bin/protoc";
   shellHook = ''
     export NIX_CXXSTDLIB_LINK=""
+    export RUST_TOOLCHAIN=nightly-2019-10-13
   '';
 }
